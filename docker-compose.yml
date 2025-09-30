@@ -2,21 +2,35 @@ version: "3.8"
 
 services:
   cassandra:
-    image: "cassandra:latest"  # Use the latest official Cassandra image
+    image: "cassandra:latest" # Use the latest official Cassandra image
     container_name: "cassandra_db"
     ports:
-      - "9042:9042"  # Expose Cassandra's default port
+      - "9042:9042" # CQL port
+      - "7000:7000" # Internode communication
+      - "7001:7001" # TLS internode communication
     environment:
       - CASSANDRA_CLUSTER_NAME=MyCassandraCluster
       - CASSANDRA_DC=DC1
       - CASSANDRA_RACK=RAC1
-      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
     volumes:
-      - cassandra_data:/var/lib/cassandra  # Persist Cassandra data on the host
+      - ./docker/cassandra/cassandra.yaml:/etc/cassandra/cassandra.yaml:ro  # include PasswordAuthenticator in this file
+      - cassandra_data:/var/lib/cassandra
     networks:
       - local_network
 
-  elascticsearch:
+  cassandra_init:
+    image: "cassandra:latest"
+    depends_on:
+      - cassandra
+    entrypoint: >
+      bash -c "
+      until cqlsh cassandra 9042 -e 'describe cluster' >/dev/null 2>&1; do sleep 2; done;
+      cqlsh cassandra 9042 -e \"CREATE ROLE IF NOT EXISTS admin WITH PASSWORD = 'admin' AND SUPERUSER = true AND LOGIN = true;\" || true
+      "
+    networks:
+      - local_network
+
+  elasticsearch:
     image: "docker.elastic.co/elasticsearch/elasticsearch:7.10.1"
     container_name: "elasticsearch"
     environment:
@@ -30,36 +44,8 @@ services:
     networks:
       - local_network
 
-  kafka:
-    image: "confluentinc/cp-kafka:latest"
-    container_name: "kafka_broker"
-    ports:
-      - "9092:9092"
-    environment:
-      # Configure listeners for both docker and host communication
-      KAFKA_LISTENERS: CONTROLLER://localhost:9091,HOST://0.0.0.0:9092,DOCKER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: HOST://localhost:9092,DOCKER://kafka:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,DOCKER:PLAINTEXT,HOST:PLAINTEXT
-      # Settings required for KRaft mode
-      KAFKA_NODE_ID: 1
-      
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9091
-      # Listener to use for broker-to-broker communication
-      KAFKA_INTER_BROKER_LISTENER_NAME: DOCKER
-
-      # Required for a single node cluster
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    depends_on:
-      - zookeeper
-    volumes:
-      - kafka_data:/var/lib/kafka/data
-    networks:
-      - local_network
-  
   zookeeper:
-    image: "confluentinc/cp-zookeeper:latest"
+    image: "confluentinc/cp-zookeeper:6.2.1"
     container_name: "zookeeper"
     ports:
       - "2181:2181"
@@ -67,16 +53,37 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     networks:
-      - local_network 
+      - local_network
+
+  kafka:
+    image: "confluentinc/cp-kafka:6.2.1"
+    container_name: "kafka_broker"
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka_broker:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - local_network
 
 volumes:
   cassandra_data:
+      driver: local
+  cassandra_commitlog:
+    driver: local
+  cassandra_saved_caches:
     driver: local
   kafka_data:
     driver: local
   es_data:
     driver: local
-  
+
 networks:
   local_network:
     driver: bridge

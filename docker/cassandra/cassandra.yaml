@@ -1,0 +1,22 @@
+cluster_name: 'MyCassandraCluster'
+num_tokens: 256
+
+seed_provider:
+  - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+    parameters:
+      - seeds: "127.0.0.1"
+
+listen_address: localhost
+rpc_address: 0.0.0.0
+# If you connect from the host to 127.0.0.1:9042, set broadcast_rpc_address to the host-side address that clients use:
+broadcast_rpc_address: 127.0.0.1
+
+endpoint_snitch: GossipingPropertyFileSnitch
+
+# Enable password authentication (change to AllowAllAuthenticator to disable auth for quick testing)
+authenticator: PasswordAuthenticator
+authorizer: CassandraAuthorizer
+
+# keep other defaults; increase if running heavier load
+concurrent_reads: 32
+concurrent_writes: 32
